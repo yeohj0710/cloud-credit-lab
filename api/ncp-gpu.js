@@ -3,7 +3,7 @@ import { customWorkerScript } from "./cloud.js";
 import { bootstrapNcpGpu, createNcpGpu, deleteNcpGpu, isNcpGpuQuotaError, ncpGpuReadiness, NCP_BLOCK_STORAGE_GIB_HOUR } from "../lib/ncp-gpu.js";
 import { listJobs, updateJob } from "../lib/jobs.js";
 import { estimateProviderGpu } from "../lib/usage.js";
-import { assertNoOtherActiveGpuJob, assertProviderCanSpend } from "../lib/spend-guard.js";
+import { assertActiveGpuJobLimit, assertProviderCanSpend } from "../lib/spend-guard.js";
 import { assertHighValueCloudGpu } from "../lib/gpu-policy.js";
 
 export default async function handler(request, response) {
@@ -20,7 +20,7 @@ export default async function handler(request, response) {
     if (job.status !== "queued") return response.status(409).json({ error: "job_not_queued" });
     const maxMinutes = Math.min(1440, Math.max(15, Number(value.max_minutes) || 60));
     assertHighValueCloudGpu("naver", String(value.spec_code || ""));
-    assertNoOtherActiveGpuJob(jobs, job.id);
+    assertActiveGpuJobLimit(jobs, job.id, Math.min(2, Math.max(1, Number(value.parallel_job_limit) || 1)));
     await assertProviderCanSpend("naver", estimateProviderGpu("naver", String(value.spec_code || ""), maxMinutes, 50).total);
     job = await updateJob(job.id, { status: "provisioning", provider: "naver", provisioning_nonce: crypto.randomUUID() });
     const requestHost = String(request.headers.host || "").toLowerCase();

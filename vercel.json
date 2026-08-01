@@ -9,11 +9,12 @@
   "functions": {
     "api/ncp-gpu.js": { "maxDuration": 60 },
     "api/cloud.js": { "maxDuration": 60 },
-    "api/cleanup.js": { "maxDuration": 60 }
+    "api/cleanup.js": { "maxDuration": 60 },
+    "api/persona-session.js": { "maxDuration": 10 }
   },
   "headers": [
     {"source": "/jobs", "headers": [{"key": "Cache-Control", "value": "no-store"}]},
     {"source": "/jobs.html", "headers": [{"key": "Cache-Control", "value": "no-store"}]},
-    {"source": "/(.*)", "headers": [{"key": "X-Content-Type-Options", "value": "nosniff"}, {"key": "Referrer-Policy", "value": "no-referrer"}]}
+    {"source": "/(.*)", "headers": [{"key": "X-Content-Type-Options", "value": "nosniff"}, {"key": "Referrer-Policy", "value": "no-referrer"}, {"key": "Permissions-Policy", "value": "camera=(), microphone=(), geolocation=()"}]}
   ]
 }

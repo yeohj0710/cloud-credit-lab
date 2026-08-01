@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { buildLaunchConfigs, selectNcpLaunchResources, isNcpGpuQuotaError, requiredZoneForSpec, NCP_GPU_HOURLY, NCP_BLOCK_STORAGE_GIB_HOUR, NCP_PUBLIC_IP_HOURLY } from "../lib/ncp-gpu.js";
+import { buildLaunchConfigs, selectNcpLaunchResources, isNcpGpuQuotaError, privateGpuAcgs, requiredZoneForSpec, NCP_GPU_HOURLY, NCP_BLOCK_STORAGE_GIB_HOUR, NCP_PUBLIC_IP_HOURLY } from "../lib/ncp-gpu.js";
 import { ncpPath } from "../lib/ncp-cloud.js";
 import { gpuCost } from "../lib/gpu-resources.js";
 
@@ -10,6 +10,10 @@ assert.equal(isNcpGpuQuotaError(new Error('NCP 3005004 Cannot create any more th
 assert.equal(isNcpGpuQuotaError(new Error("network timeout")), false);
 assert.equal(requiredZoneForSpec("gp1ls16-g3"), "KR-2");
 assert.equal(requiredZoneForSpec("gp1l4-g3"), null);
+assert.deepEqual(privateGpuAcgs([
+  { accessControlGroupName: "default" },
+  { accessControlGroupName: "cgr-private-training", accessControlGroupNo: "safe" },
+]), [{ accessControlGroupName: "cgr-private-training", accessControlGroupNo: "safe" }]);
 assert.deepEqual(buildLaunchConfigs(
   [{ subnetNo: "s1", vpcNo: "v1", subnetName: "public", subnetType: { code: "PUBLIC" } }, { subnetNo: "s2", vpcNo: "v2", subnetName: "private", subnetType: { code: "PRIVATE" } }],
   [{ accessControlGroupNo: "a1", accessControlGroupName: "default", vpcNo: "v1" }, { accessControlGroupNo: "a2", accessControlGroupName: "wrong", vpcNo: "v3" }],

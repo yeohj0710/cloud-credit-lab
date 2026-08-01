@@ -6,11 +6,14 @@ param(
   [ValidateSet('auto', 'naver', 'kakao')][string]$Provider = 'auto',
   [ValidateRange(15, 1440)][int]$Minutes = 60,
   [ValidateRange(50, 2000)][int]$VolumeGB = 80,
+  [ValidatePattern('^gp[124]ls?\d+-g3$')][string]$NaverSpecCode,
+  [ValidateRange(1, 2)][int]$ParallelJobLimit = 1,
   [switch]$ApproveEstimatedCost,
   [ValidateRange(1, 10000000)][decimal]$MaxEstimatedCostKRW = 2000,
   [bool]$Wait = $true,
   [ValidateRange(5, 300)][int]$PollSeconds = 15,
   [string]$DownloadDirectory,
+  [switch]$DeleteRemoteArtifacts,
   [string]$OutputPath = 'outputs',
   [string]$BaseUrl = 'https://cloud-gpu-runner.vercel.app',
   [string]$Password
@@ -31,10 +34,22 @@ if (-not $Password) { $Password = $env:CGR_PASSWORD }
 if (-not $Password) { throw 'Set CGR_PASSWORD or pass -Password.' }
 
 $session = New-Object Microsoft.PowerShell.Commands.WebRequestSession
-function Invoke-CclJson([string]$Uri, [string]$Method = 'GET', $Body = $null) {
+function Connect-CclSession {
+  $loginArgs = @{ Uri = "$BaseUrl/api/login"; Method = 'POST'; WebSession = $session; UseBasicParsing = $true; ContentType = 'application/json'; Body = (@{ password = $Password } | ConvertTo-Json -Compress) }
+  return Invoke-RestMethod @loginArgs
+}
+function Invoke-CclJson([string]$Uri, [string]$Method = 'GET', $Body = $null, [bool]$AllowAuthRetry = $true) {
   $args = @{ Uri = "$BaseUrl$Uri"; Method = $Method; WebSession = $session; UseBasicParsing = $true }
   if ($null -ne $Body) { $args.ContentType = 'application/json'; $args.Body = ($Body | ConvertTo-Json -Depth 12 -Compress) }
-  return Invoke-RestMethod @args
+  try { return Invoke-RestMethod @args }
+  catch {
+    $statusCode = [int]$_.Exception.Response.StatusCode
+    if ($AllowAuthRetry -and $statusCode -in @(401, 403)) {
+      $null = Connect-CclSession
+      return Invoke-CclJson $Uri $Method $Body $false
+    }
+    throw
+  }
 }
 function Get-CclJob([string]$Id) {
   $jobs = Invoke-CclJson '/api/jobs'
@@ -56,16 +71,18 @@ function Write-JobEvidence($Job, $Estimate, [string]$Directory, $Usage) {
   $evidence | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $Directory 'job.json') -Encoding utf8
 }
 
-$null = Invoke-CclJson '/api/login' 'POST' @{ password = $Password }
+$null = Connect-CclSession
 $credit = Invoke-CclJson '/api/usage'
 $naver = $null
 try { $naver = Invoke-CclJson '/api/ncp-gpu' } catch { if ($Provider -eq 'naver') { throw } }
 $resolved = if ($Provider -eq 'auto') { if ($naver -and $naver.ok) { 'naver' } else { 'kakao' } } else { $Provider }
 if ($resolved -eq 'naver') {
   if (-not $naver.ok) { throw "NAVER GPU is not ready: $($naver.missing -join ', ')" }
-  $spec = $naver.specs | Where-Object { $_.vram_per_gpu_gb -ge 48 } | Sort-Object hourly_rate | Select-Object -First 1
+  $eligibleSpecs = $naver.specs | Where-Object { $_.vram_per_gpu_gb -ge 48 }
+  $spec = if ($NaverSpecCode) { $eligibleSpecs | Where-Object { $_.serverSpecCode -eq $NaverSpecCode } | Select-Object -First 1 } else { $eligibleSpecs | Sort-Object hourly_rate | Select-Object -First 1 }
   if (-not $spec) { throw 'No NAVER GPU materially exceeds the local RTX 5070 Ti 16GB baseline.' }
-  $launch = $naver.launch_configs | Select-Object -First 1
+  $launch = if ($spec.required_zone_code) { $naver.launch_configs | Where-Object { $_.zone_code -eq $spec.required_zone_code } | Select-Object -First 1 } else { $naver.launch_configs | Select-Object -First 1 }
+  if (-not $launch) { throw "No NAVER launch configuration is compatible with $($spec.serverSpecCode)." }
   $estimate = Invoke-CclJson '/api/estimate?type=gpu' 'POST' @{ provider = 'naver'; flavor = $spec.serverSpecCode; minutes = $Minutes; volume_gb = 50 }
   $remaining = $credit.remaining.naver
   $selectedGpu = $spec.serverSpecCode
@@ -112,7 +129,7 @@ try {
   if ($resolved -eq 'naver') {
     $loginKeyName = if ($naver.keys[0].loginKeyName) { $naver.keys[0].loginKeyName } else { $naver.keys[0].keyName }
     if (-not $loginKeyName) { throw 'NAVER login key name is missing.' }
-    $null = Invoke-CclJson '/api/ncp-gpu' 'POST' @{ job_id = $created.job.id; spec_code = $spec.serverSpecCode; vpc_no = $launch.vpc_no; subnet_no = $launch.subnet_no; login_key_name = $loginKeyName; acg_no = $launch.acg_no; max_minutes = $Minutes; volume_gb = 50; execution_password = $Password }
+    $null = Invoke-CclJson '/api/ncp-gpu' 'POST' @{ job_id = $created.job.id; spec_code = $spec.serverSpecCode; vpc_no = $launch.vpc_no; subnet_no = $launch.subnet_no; login_key_name = $loginKeyName; acg_no = $launch.acg_no; max_minutes = $Minutes; volume_gb = 50; parallel_job_limit = $ParallelJobLimit; execution_password = $Password }
   } else {
     $null = Invoke-CclJson '/api/cloud?action=create' 'POST' @{ job_id = $created.job.id; purpose = 'local-project'; flavor_id = $flavor.id; image_id = $image.id; subnet_id = $kakao.subnets[0].id; key_name = $kakao.keypairs[0].name; security_group = $kakao.security_groups[0].name; max_minutes = $Minutes; volume_gb = $VolumeGB; execution_password = $Password }
   }
@@ -156,7 +173,17 @@ do {
 $usage = Invoke-CclJson '/api/usage'
 Write-JobEvidence $job $estimate $jobDirectory $usage
 if ($job.log_key) { Invoke-WebRequest -Uri "$BaseUrl/api/jobs?action=log&id=$jobId" -WebSession $session -OutFile (Join-Path $jobDirectory 'run.log') -UseBasicParsing | Out-Null }
-if ($job.result_key) { Invoke-WebRequest -Uri "$BaseUrl/api/jobs?action=result&id=$jobId" -WebSession $session -OutFile (Join-Path $jobDirectory 'result.tar.gz') -UseBasicParsing | Out-Null }
+if ($job.result_key) {
+  $resultUrl = Invoke-CclJson "/api/jobs?action=result-url&id=$jobId"
+  Invoke-WebRequest -Uri $resultUrl.url -OutFile (Join-Path $jobDirectory 'result.tar.gz') -UseBasicParsing | Out-Null
+}
+if ($DeleteRemoteArtifacts) {
+  $remoteKeys = @($job.code_key, $job.data_key, $job.result_key, $job.log_key, $job.preview_key, $job.manifest_key) | Where-Object { $_ } | Select-Object -Unique
+  foreach ($remoteKey in $remoteKeys) {
+    try { $null = Invoke-CclJson ("/api/ncp-storage?action=object&bucket={0}&key={1}" -f [uri]::EscapeDataString($job.bucket), [uri]::EscapeDataString($remoteKey)) 'DELETE' }
+    catch { Write-Warning "Remote artifact cleanup failed for one object: $($_.Exception.Message)" }
+  }
+}
 Write-Host "Artifacts: $jobDirectory"
 Write-Host ("Actual cost: {0:N2} KRW; remaining {1}: {2:N2} KRW; instance/public-IP cleanup: verified" -f $job.usage_amount, $resolved, $usage.remaining.$resolved)
 if ($timedOut) { throw "GPU job timed out and was cancelled: $jobId" }

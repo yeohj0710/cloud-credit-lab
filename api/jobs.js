@@ -25,6 +25,11 @@ export default async function handler(request, response) {
       response.setHeader("content-disposition", `attachment; filename="${job.id}.${isLog ? "log.txt" : job.type === "custom-gpu" ? "tar.gz" : "json"}"`);
       return response.status(200).send(result.body);
     }
+    if (request.method === "GET" && action === "result-url") {
+      const job = (await listJobs()).find((item) => item.id === String(request.query?.id || ""));
+      if (!job?.result_key) return response.status(404).json({ error: "result_not_found" });
+      return response.json({ ok: true, url: presignObject(job.bucket, job.result_key, "GET", 3600) });
+    }
     if (request.method === "GET" && action === "media-url") {
       const job = (await listJobs()).find((item) => item.id === String(request.query?.id || ""));
       if (!job) return response.status(404).json({ error: "job_not_found" });

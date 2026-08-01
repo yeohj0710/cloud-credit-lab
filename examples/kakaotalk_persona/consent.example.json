@@ -1,0 +1,6 @@
+{
+  "all_participants_consented": false,
+  "scope": "naver-cloud-private-persona-training",
+  "confirmed_at": null,
+  "note": "참여자 전원이 외부 클라우드 학습과 비공개 로컬 사용 범위를 이해하고 동의한 뒤 true로 바꿉니다."
+}

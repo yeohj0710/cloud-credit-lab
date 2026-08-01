@@ -13,7 +13,15 @@ export default async function middleware(request) {
   )
     return;
   if (await isAuthorized(request)) return;
-  return Response.redirect(new URL("/login.html", request.url), 307);
+  if (url.pathname.startsWith("/api/")) {
+    return new Response(JSON.stringify({ error: "authentication_required" }), {
+      status: 401,
+      headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" },
+    });
+  }
+  const login = new URL("/login.html", request.url);
+  login.searchParams.set("next", `${url.pathname}${url.search}`);
+  return Response.redirect(login, 307);
 }
 export const config = {
   matcher: [
@@ -31,6 +39,8 @@ export const config = {
     "/explorer.html",
     "/research",
     "/research.html",
+    "/persona",
+    "/persona.html",
     "/api/:path*",
   ],
 };

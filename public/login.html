@@ -16,7 +16,7 @@
       <form id="form"><input class="sr-only" name="username" autocomplete="username" value="cloud-gpu-runner" /><input id="password" type="password" inputmode="numeric" autocomplete="current-password" placeholder="비밀번호" autofocus /><button>로그인</button><div id="error" class="error" role="alert"></div></form>
     </main>
     <script>
-      document.querySelector("#form").addEventListener("submit",async(event)=>{event.preventDefault();const error=document.querySelector("#error");error.textContent="";const response=await fetch("/api/login",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({password:document.querySelector("#password").value})});if(response.ok)location.replace("/");else error.textContent="비밀번호가 올바르지 않아요."});
+      document.querySelector("#form").addEventListener("submit",async(event)=>{event.preventDefault();const error=document.querySelector("#error");error.textContent="";const response=await fetch("/api/login",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({password:document.querySelector("#password").value})});const requested=new URLSearchParams(location.search).get("next")||"/";const next=requested.startsWith("/")&&!requested.startsWith("//")?requested:"/";if(response.ok)location.replace(next);else error.textContent="비밀번호가 올바르지 않아요."});
     </script>
   </body>
 </html>
