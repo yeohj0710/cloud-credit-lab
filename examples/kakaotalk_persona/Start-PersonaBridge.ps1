@@ -40,6 +40,12 @@ if (Test-Path -LiteralPath $statePath) {
   Stop-RecordedProcess $previous 'tunnel_pid' 'cloudflared'
   Stop-RecordedProcess $previous 'bridge_pid' 'local_bridge\.mjs'
 }
+$staleProcesses = Get-CimInstance Win32_Process | Where-Object {
+  ($_.Name -eq 'node.exe' -and $_.CommandLine -match 'local_bridge\.mjs') -or
+  ($_.Name -eq 'cloudflared.exe' -and $_.CommandLine -match '127\.0\.0\.1:8090')
+}
+foreach ($process in $staleProcesses) { Stop-Process -Id $process.ProcessId -Force -ErrorAction SilentlyContinue }
+Start-Sleep -Milliseconds 500
 
 $bridge = Start-Process -FilePath $node -ArgumentList @('--env-file=.env.local', 'examples\kakaotalk_persona\local_bridge.mjs') -WorkingDirectory $root -WindowStyle Hidden -RedirectStandardOutput $bridgeLog -RedirectStandardError $bridgeError -PassThru
 $bridgeDeadline = (Get-Date).AddSeconds(20)
@@ -51,6 +57,11 @@ while ((Get-Date) -lt $bridgeDeadline) {
   Start-Sleep -Milliseconds 500
 }
 if (-not $bridgeReady) { Stop-Process -Id $bridge.Id -Force -ErrorAction SilentlyContinue; throw 'The local persona bridge did not become ready.' }
+$bridgeStatePath = Join-Path $private 'persona-bridge-state.json'
+$bridgeState = Get-Content -Raw -LiteralPath $bridgeStatePath | ConvertFrom-Json
+$bridgePid = [int]$bridgeState.bridge_pid
+$actualBridge = Get-CimInstance Win32_Process -Filter "ProcessId=$bridgePid" -ErrorAction SilentlyContinue
+if (-not $actualBridge -or $actualBridge.CommandLine -notmatch 'local_bridge\.mjs') { throw 'The local persona bridge did not report a valid process ID.' }
 
 $tunnel = Start-Process -FilePath $cloudflared -ArgumentList @('tunnel', '--url', 'http://127.0.0.1:8090', '--no-autoupdate', '--loglevel', 'info') -WindowStyle Hidden -RedirectStandardOutput $tunnelLog -RedirectStandardError $tunnelError -PassThru
 $tunnelDeadline = (Get-Date).AddSeconds(45)
@@ -69,6 +80,15 @@ if (-not $tunnelUrl) {
 }
 
 $deploymentUrl = ''
+$state = [ordered]@{
+  started_at = (Get-Date).ToString('o')
+  bridge_pid = $bridgePid
+  tunnel_pid = $tunnel.Id
+  tunnel_url = $tunnelUrl
+  deployment_url = $deploymentUrl
+  idle_timeout_minutes = [int](Read-EnvValue 'PERSONA_IDLE_TIMEOUT_MINUTES')
+}
+$state | ConvertTo-Json | Set-Content -LiteralPath $statePath -Encoding UTF8
 if ($SyncVercel) {
   $npx = (Get-Command npx.cmd -ErrorAction Stop).Source
   $savedPreference = $ErrorActionPreference
@@ -88,13 +108,6 @@ if ($SyncVercel) {
   $ErrorActionPreference = $savedPreference
 }
 
-$state = [ordered]@{
-  started_at = (Get-Date).ToString('o')
-  bridge_pid = $bridge.Id
-  tunnel_pid = $tunnel.Id
-  tunnel_url = $tunnelUrl
-  deployment_url = $deploymentUrl
-  idle_timeout_minutes = [int](Read-EnvValue 'PERSONA_IDLE_TIMEOUT_MINUTES')
-}
+$state.deployment_url = $deploymentUrl
 $state | ConvertTo-Json | Set-Content -LiteralPath $statePath -Encoding UTF8
-[pscustomobject]@{ Ready=$true; TunnelUrl=$tunnelUrl; DeploymentUrl=$deploymentUrl; BridgePid=$bridge.Id; TunnelPid=$tunnel.Id } | ConvertTo-Json -Compress
+[pscustomobject]@{ Ready=$true; TunnelUrl=$tunnelUrl; DeploymentUrl=$deploymentUrl; BridgePid=$bridgePid; TunnelPid=$tunnel.Id } | ConvertTo-Json -Compress

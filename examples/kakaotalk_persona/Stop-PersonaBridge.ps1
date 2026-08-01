@@ -21,4 +21,9 @@ foreach ($item in @(@{ Id=$state.tunnel_pid; Pattern='cloudflared' }, @{ Id=$sta
   $process = Get-CimInstance Win32_Process -Filter "ProcessId=$processId" -ErrorAction SilentlyContinue
   if ($process -and $process.CommandLine -match $item.Pattern) { Stop-Process -Id $processId -Force -ErrorAction SilentlyContinue; $stopped += 1 }
 }
+$remaining = Get-CimInstance Win32_Process | Where-Object {
+  ($_.Name -eq 'node.exe' -and $_.CommandLine -match 'local_bridge\.mjs') -or
+  ($_.Name -eq 'cloudflared.exe' -and $_.CommandLine -match '127\.0\.0\.1:8090')
+}
+foreach ($process in $remaining) { Stop-Process -Id $process.ProcessId -Force -ErrorAction SilentlyContinue; $stopped += 1 }
 [pscustomobject]@{ Stopped=$true; Processes=$stopped }
