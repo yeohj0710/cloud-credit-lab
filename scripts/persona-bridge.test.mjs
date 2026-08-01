@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { issuePersonaToken, verifyPersonaToken } from "../lib/persona-token.js";
 import { allowedWebOrigin, buildPersonaPrompt, sanitizeModelReply, validateChatRequest } from "../examples/kakaotalk_persona/local_bridge.mjs";
+import { buildStyleIndex, hasPrivateOverlap, retrieveStyleExamples } from "../lib/persona-style.js";
 
 const secret = "test-secret-that-is-long-enough-for-hmac-123456";
 
@@ -36,6 +37,29 @@ test("prompt uses the training shape and reply removes the alias prefix", () => 
   assert.match(prompt, /P_TEST.*\uB2F5\uC7A5/);
   assert.equal(sanitizeModelReply("P_TEST: short reply", "P_TEST"), "short reply");
   assert.throws(() => sanitizeModelReply("<think>hidden</think>", "P_TEST"), /model_reply_empty/);
+});
+
+test("local style retrieval is speaker-specific and query-aware", () => {
+  const index = buildStyleIndex([
+    { target: "P_TEST", query: "lunch menu", reply: "noodles sound good" },
+    { target: "P_TEST", query: "weekend plan", reply: "let's rest at home" },
+    { target: "P_OTHER", query: "lunch menu", reply: "salad please" },
+  ], { maxPerAlias: 10 });
+  const examples = retrieveStyleExamples(index, "P_TEST", "what should we eat for lunch", { limit: 1 });
+  assert.deepEqual(examples, ["noodles sound good"]);
+});
+
+test("private exemplar overlap is detected before a reply leaves the PC", () => {
+  const examples = ["this private phrase must never be copied verbatim"];
+  assert.equal(hasPrivateOverlap("private phrase must never be copied", examples, { minLength: 12 }), true);
+  assert.equal(hasPrivateOverlap("a newly written short answer", examples, { minLength: 12 }), false);
+});
+
+test("prompt can include local style evidence without changing the training transcript shape", () => {
+  const prompt = buildPersonaPrompt("P_TEST", [{ role: "user", content: "hello" }], ["short informal example"]);
+  assert.match(prompt, /<STYLE_EXAMPLES speaker="P_TEST">/);
+  assert.match(prompt, /short informal example/);
+  assert.match(prompt, /<CHAT room="private-web">/);
 });
 
 test("persona page and middleware keep the remote chat authenticated", async () => {

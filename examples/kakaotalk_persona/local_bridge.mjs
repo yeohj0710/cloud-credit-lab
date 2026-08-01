@@ -4,6 +4,7 @@ import { dirname, join, resolve } from "node:path";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { verifyPersonaToken } from "../../lib/persona-token.js";
+import { hasPrivateOverlap, loadStyleIndex, retrieveStyleExamples } from "../../lib/persona-style.js";
 
 const root = resolve(process.env.CGR_RUNNER_ROOT || join(dirname(fileURLToPath(import.meta.url)), "../.."));
 const privateDir = join(root, "etc", "kakaotalk-persona");
@@ -11,6 +12,7 @@ const artifactRoot = join(root, "artifacts", "cloud-gpu", "kakaotalk-persona");
 const modelPath = join(privateDir, "models", "Qwen3-30B-A3B-Q4_K_M.gguf");
 const serverPath = join(privateDir, "llama.cpp", "llama-server.exe");
 const statePath = join(privateDir, "persona-bridge-state.json");
+const trainPath = join(privateDir, "train.jsonl");
 const idleMinutes = Math.min(120, Math.max(5, Number(process.env.PERSONA_IDLE_TIMEOUT_MINUTES) || 20));
 const bridgeSecret = String(process.env.PERSONA_BRIDGE_SECRET || "");
 const bridgePort = Math.min(65535, Math.max(1024, Number(process.env.PERSONA_BRIDGE_PORT) || 8090));
@@ -20,6 +22,7 @@ let modelProcess = null;
 let modelStarting = null;
 let lastActivity = 0;
 let lastModelError = null;
+let styleIndexPromise = null;
 
 export function allowedWebOrigin(origin) {
   try {
@@ -43,9 +46,12 @@ export function validateChatRequest(value, aliases) {
   return { persona, messages };
 }
 
-export function buildPersonaPrompt(persona, messages) {
+export function buildPersonaPrompt(persona, messages, styleExamples = []) {
   const transcript = messages.slice(-16).map((message) => `${message.role === "assistant" ? persona : "USER"}: ${message.content}`).join("\n");
-  return `<CHAT room="private-web">\n${transcript}\n</CHAT>\n${persona}\uB85C \uB2E4\uC74C \uB2F5\uC7A5\uB9CC \uC791\uC131\uD574.`;
+  const evidence = styleExamples.length
+    ? `<STYLE_EXAMPLES speaker="${persona}">\n${styleExamples.map((reply) => `- ${reply}`).join("\n")}\n</STYLE_EXAMPLES>\n\uC704 \uC608\uC2DC\uB294 \uB9D0\uD22C\uC640 \uAE38\uC774\uB9CC \uCC38\uACE0\uD558\uACE0 \uBB38\uC7A5\uC744 \uADF8\uB300\uB85C \uBCF5\uC0AC\uD558\uC9C0 \uB9C8.\n`
+    : "";
+  return `${evidence}<CHAT room="private-web">\n${transcript}\n</CHAT>\n${persona}\uB85C \uB2E4\uC74C \uB2F5\uC7A5\uB9CC \uC791\uC131\uD574.`;
 }
 
 export function sanitizeModelReply(value, persona) {
@@ -212,15 +218,17 @@ function enforceRateLimit(key) {
 
 async function chat(value, personaList) {
   const parsed = validateChatRequest(value, new Set(personaList.map((item) => item.alias)));
-  await ensureModel();
-  const prompt = buildPersonaPrompt(parsed.persona, parsed.messages);
+  styleIndexPromise ||= existsSync(trainPath) ? loadStyleIndex(trainPath) : Promise.resolve(new Map());
+  const [styleIndex] = await Promise.all([styleIndexPromise, ensureModel()]);
+  const latestUser = [...parsed.messages].reverse().find((message) => message.role === "user")?.content || "";
+  const styleExamples = retrieveStyleExamples(styleIndex, parsed.persona, latestUser, { limit: 3 });
   const system = "\uBE44\uACF5\uAC1C \uCE74\uCE74\uC624\uD1A1 \uB300\uD654\uC758 \uB9D0\uD22C\uB97C \uC7AC\uD604\uD55C\uB2E4. \uCC38\uAC00\uC790\uB294 \uAC00\uBA85\uC73C\uB85C\uB9CC \uD45C\uC2DC\uD55C\uB2E4. \uBB38\uB9E5\uC5D0 \uC5C6\uB294 \uAC1C\uC778\uC815\uBCF4\uB098 \uC0AC\uC801 \uC0AC\uC2E4\uC744 \uCD94\uCE21\uD558\uAC70\uB098 \uACF5\uAC1C\uD558\uC9C0 \uC54A\uB294\uB2E4. \uB2F5\uC7A5\uC740 \uCE74\uCE74\uC624\uD1A1 \uD55C\uB450 \uBB38\uC7A5 \uAE38\uC774\uB85C\uB9CC \uC791\uC131\uD55C\uB2E4.";
-  const response = await fetch(`http://127.0.0.1:${modelPort}/v1/chat/completions`, {
+  const infer = async (examples) => fetch(`http://127.0.0.1:${modelPort}/v1/chat/completions`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
       model: "local-persona",
-      messages: [{ role: "system", content: system }, { role: "user", content: prompt }],
+      messages: [{ role: "system", content: system }, { role: "user", content: buildPersonaPrompt(parsed.persona, parsed.messages, examples) }],
       max_tokens: 128,
       temperature: 0.72,
       top_p: 0.85,
@@ -230,10 +238,18 @@ async function chat(value, personaList) {
     }),
     signal: AbortSignal.timeout(180_000),
   });
+  let response = await infer(styleExamples);
   if (!response.ok) throw new Error(response.status === 503 ? "model_loading" : "model_inference_failed");
-  const result = await response.json();
+  let result = await response.json();
+  let reply = sanitizeModelReply(result.choices?.[0]?.message?.content, parsed.persona);
+  if (hasPrivateOverlap(reply, styleExamples)) {
+    response = await infer([]);
+    if (!response.ok) throw new Error("model_inference_failed");
+    result = await response.json();
+    reply = sanitizeModelReply(result.choices?.[0]?.message?.content, parsed.persona);
+  }
   lastActivity = Date.now();
-  return sanitizeModelReply(result.choices?.[0]?.message?.content, parsed.persona);
+  return reply;
 }
 
 export function createPersonaBridge() {
