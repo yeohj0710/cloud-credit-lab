@@ -76,3 +76,14 @@ test("persona page and middleware keep the remote chat authenticated", async () 
   assert.match(middleware, /status: 401/);
   assert.doesNotMatch(page + client, /PERSONA_BRIDGE_SECRET/);
 });
+
+test("Windows login startup restores the bridge, tunnel, and Vercel preview", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const script = await readFile(new URL("../examples/kakaotalk_persona/Register-PersonaBridgeStartup.ps1", import.meta.url), "utf8");
+  assert.match(script, /New-ScheduledTaskTrigger\s+-AtLogOn/);
+  assert.match(script, /-SyncVercel/);
+  assert.match(script, /-DeployPreview/);
+  assert.match(script, /Register-ScheduledTask/);
+  const startScript = await readFile(new URL("../examples/kakaotalk_persona/Start-PersonaBridge.ps1", import.meta.url), "utf8");
+  assert.match(startScript, /Microsoft\\WinGet\\Packages/);
+});

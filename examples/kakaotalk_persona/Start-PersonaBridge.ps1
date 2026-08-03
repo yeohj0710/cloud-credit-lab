@@ -31,7 +31,12 @@ function Stop-RecordedProcess([object]$State, [string]$Property, [string]$Expect
 if (-not (Test-Path -LiteralPath $envPath)) { throw '.env.local was not found.' }
 $secret = Read-EnvValue 'PERSONA_BRIDGE_SECRET'
 if ($secret.Length -lt 32) { throw 'PERSONA_BRIDGE_SECRET must contain at least 32 characters.' }
-$cloudflared = (Get-Command cloudflared -ErrorAction Stop).Source
+$cloudflaredCommand = Get-Command cloudflared -ErrorAction SilentlyContinue
+$cloudflared = if ($cloudflaredCommand) { $cloudflaredCommand.Source } else {
+  Get-ChildItem -LiteralPath (Join-Path $env:LOCALAPPDATA 'Microsoft\WinGet\Packages') -Filter 'cloudflared.exe' -File -Recurse -ErrorAction SilentlyContinue |
+    Select-Object -ExpandProperty FullName -First 1
+}
+if (-not $cloudflared -or -not (Test-Path -LiteralPath $cloudflared)) { throw 'cloudflared.exe was not found.' }
 $node = (Get-Command node -ErrorAction Stop).Source
 New-Item -ItemType Directory -Force -Path $private | Out-Null
 
