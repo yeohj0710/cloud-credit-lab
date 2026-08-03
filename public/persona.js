@@ -23,6 +23,7 @@ function setEnabled(enabled) {
   $("#messageInput").disabled = !enabled || state.busy;
   $("#sendButton").disabled = !enabled || state.busy;
   $("#stopButton").disabled = !enabled || state.busy;
+  $("#startButton").disabled = state.busy;
 }
 
 function appendBubble(role, text, extraClass = "") {
@@ -72,6 +73,7 @@ function friendlyError(code) {
     request_timeout: ["답변 시간이 초과됐어요", "모델을 다시 켠 뒤 한 번 더 시도해 주세요."],
     model_files_missing: ["모델 파일을 찾지 못했어요", "로컬 모델과 LoRA 어댑터 경로를 확인해 주세요."],
     model_start_failed: ["로컬 모델을 시작하지 못했어요", "GPU 메모리를 사용하는 다른 프로그램을 닫고 다시 시도해 주세요."],
+    model_loading: ["로컬 모델을 불러오고 있어요", "잠시 기다린 뒤 다시 눌러 주세요."],
     rate_limited: ["요청이 너무 많아요", "잠시 기다린 뒤 다시 보내 주세요."],
     persona_not_found: ["가명 화자를 찾지 못했어요", "목록을 새로 불러온 뒤 다시 선택해 주세요."],
   }[code] || ["대화를 이어가지 못했어요", "연결 상태를 확인하고 다시 시도해 주세요."];
@@ -102,6 +104,29 @@ async function connect() {
     setEnabled(false);
   }
 }
+
+$("#startButton").addEventListener("click", async () => {
+  if (state.busy) return;
+  state.busy = true;
+  setEnabled(Boolean(state.personas.length));
+  setConnection("pending", "PC 연결·모델 실행 중");
+  setNotice("", "PC에 연결하고 모델을 켜고 있어요", "첫 실행은 최대 2분 정도 걸릴 수 있어요.");
+  try {
+    await getSession();
+    const data = await bridge("/api/model/start", { method: "POST", body: "{}", timeout: 180_000 });
+    setConnection("online", "모델 실행 중");
+    setNotice("ready", "대화할 준비가 되었어요", `아무 요청이 없으면 ${data.idle_timeout_minutes}분 뒤 모델이 자동으로 꺼집니다.`);
+    if (!state.personas.length) await connect();
+  } catch (error) {
+    const code = error.message === "Failed to fetch" ? "FailedToFetch" : error.message;
+    const [title, detail] = friendlyError(code);
+    setConnection("offline", "PC 연결 안 됨");
+    setNotice("error", title, code === "FailedToFetch" ? "PC를 켠 뒤 이 버튼을 다시 눌러 주세요." : detail);
+  } finally {
+    state.busy = false;
+    setEnabled(Boolean(state.personas.length));
+  }
+});
 
 $("#chatForm").addEventListener("submit", async (event) => {
   event.preventDefault();

@@ -272,6 +272,9 @@ export function createPersonaBridge() {
       if (path === "/api/status" && request.method === "GET") {
         return send(response, 200, { ok: true, model_status: (await modelReady()) ? "ready" : modelState(), last_error: lastModelError }, origin);
       }
+      if (path === "/api/model/start" && request.method === "POST") {
+        await ensureModel(); return send(response, 200, { ok: true, model_status: "ready", idle_timeout_minutes: idleMinutes }, origin);
+      }
       if (path === "/api/model/stop" && request.method === "POST") {
         await stopModel(); return send(response, 200, { ok: true, model_status: "offline" }, origin);
       }

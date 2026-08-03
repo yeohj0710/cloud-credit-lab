@@ -75,6 +75,10 @@ test("persona page and middleware keep the remote chat authenticated", async () 
   assert.match(middleware, /url\.pathname\.startsWith\("\/api\/"\)/);
   assert.match(middleware, /status: 401/);
   assert.doesNotMatch(page + client, /PERSONA_BRIDGE_SECRET/);
+  assert.match(page, /id="startButton"/);
+  assert.match(client, /\/api\/model\/start/);
+  assert.match(client, /startButton.*addEventListener/s);
+  assert.match(await readFile(new URL("../examples/kakaotalk_persona/local_bridge.mjs", import.meta.url), "utf8"), /path === "\/api\/model\/start"/);
 });
 
 test("Windows login startup restores the bridge, tunnel, and Vercel preview", async () => {
