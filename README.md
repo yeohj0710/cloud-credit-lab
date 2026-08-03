@@ -6,6 +6,10 @@ The public playground keeps the Qwen text LoRA pipeline and adds a zero-preparat
 
 Vercel remains a stateless control plane. Training and checkpoint uploads run on the disposable GPU server; browser uploads go directly to Object Storage, and polling stops when the page is not visible. See `docs/visual-lora-playground.md` for the execution and recovery contract.
 
+## Private KakaoTalk persona chat
+
+The local-only persona model, Vercel chat bridge, privacy boundary, restart recovery, and handoff checklist are documented in [`examples/kakaotalk_persona/README.md`](examples/kakaotalk_persona/README.md).
+
 ## Capability-first GPU policy
 
 The local baseline is an RTX 5070 Ti with 16GB VRAM. Paid cloud GPU is blocked when the local GPU can reasonably complete the work. Cloud execution permits NVIDIA accelerators with at least 48GB VRAM per GPU: NAVER L40S and KakaoCloud A100 (`p2i`). NAVER L4 and KakaoCloud T4 (`gn1i`) are rejected. Eligible accelerators usually exceed the default 2,000 KRW approval, so paid execution requires a task-specific budget.

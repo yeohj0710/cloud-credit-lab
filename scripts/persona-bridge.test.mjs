@@ -91,3 +91,13 @@ test("Windows login startup restores the bridge, tunnel, and Vercel preview", as
   const startScript = await readFile(new URL("../examples/kakaotalk_persona/Start-PersonaBridge.ps1", import.meta.url), "utf8");
   assert.match(startScript, /Microsoft\\WinGet\\Packages/);
 });
+
+test("persona handoff guide preserves recovery and privacy instructions", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const guide = await readFile(new URL("../examples/kakaotalk_persona/README.md", import.meta.url), "utf8");
+  assert.match(guide, /## 수동 복구/);
+  assert.match(guide, /## 다음 작업자의 확인 순서/);
+  assert.match(guide, /Start-PersonaBridge\.ps1 -SyncVercel -DeployPreview/);
+  assert.match(guide, /대화문, 실명 매핑, 개인정보/);
+  assert.doesNotMatch(guide, /�/);
+});
