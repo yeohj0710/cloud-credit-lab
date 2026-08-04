@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="theme-color" content="#ffffff" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self' https:; img-src 'self' data:; style-src 'self'; script-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'" />
+    <title>우리 톡방 AI</title>
+    <link rel="stylesheet" href="/persona.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="topbar">
+        <a href="/" class="brand" aria-label="홈으로 이동">WELLNESSBOX</a>
+        <div id="connectionBadge" class="connection pending"><i></i><span>PC 연결 확인 중</span></div>
+      </header>
+
+      <section class="intro" aria-labelledby="pageTitle">
+        <p class="section-label">PRIVATE PERSONA</p>
+        <h1 id="pageTitle">우리 대화의 말투로<br />가볍게 이야기해 보세요</h1>
+        <p>모델은 사용자 PC에서만 실행됩니다. PC가 꺼져 있거나 로컬 브리지가 멈추면 대화도 자동으로 중단됩니다.</p>
+      </section>
+
+      <section class="chat-section" aria-label="말투 챗봇">
+        <div class="chat-toolbar">
+          <label for="personaSelect">답장할 가명 화자</label>
+          <div class="toolbar-actions">
+            <select id="personaSelect" disabled><option>PC 연결 후 선택할 수 있어요</option></select>
+            <button id="startButton" class="primary-action" type="button">PC 연결·모델 켜기</button>
+            <button id="clearButton" class="secondary" type="button">대화 지우기</button>
+            <button id="stopButton" class="secondary danger" type="button">모델 끄기</button>
+          </div>
+        </div>
+
+        <div id="notice" class="notice" role="status" aria-live="polite">
+          <strong>사용자 PC를 찾고 있어요</strong>
+          <span>연결까지 잠시 기다려 주세요.</span>
+        </div>
+
+        <div id="messages" class="messages" aria-live="polite" aria-label="대화 내용">
+          <article class="bubble assistant"><p>가명 화자를 고른 뒤 메시지를 보내세요. 실제 이름과 가명 연결 정보는 이 화면으로 전송되지 않습니다.</p></article>
+        </div>
+
+        <form id="chatForm" class="composer">
+          <label class="sr-only" for="messageInput">메시지</label>
+          <textarea id="messageInput" rows="1" maxlength="1200" placeholder="메시지를 입력하세요" disabled></textarea>
+          <button id="sendButton" type="submit" disabled>보내기</button>
+        </form>
+        <p class="privacy-note">대화 요청은 Vercel 함수가 아닌 암호화된 터널을 통해 사용자 PC로 직접 전송됩니다. 자동 전송이나 실제 인물 사칭에는 사용하지 마세요.</p>
+      </section>
+    </main>
+    <script src="/persona.js" type="module"></script>
+  </body>
+</html>

@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { validateCustomJob } from "../lib/jobs.js";
 import { customWorkerScript } from "../api/cloud.js";
 import { estimateGpu, estimateProviderGpu } from "../lib/usage.js";
-import { assertCreditCoversEstimate, assertNoOtherActiveGpuJob } from "../lib/spend-guard.js";
+import { assertActiveGpuJobLimit, assertCreditCoversEstimate, assertNoOtherActiveGpuJob } from "../lib/spend-guard.js";
 
 process.env.SESSION_SECRET ||= "test-session-secret";
 process.env.NCP_OBJECT_STORAGE_ACCESS_KEY_ID ||= "test-access";
@@ -56,6 +56,9 @@ for (const [filename, source] of [["train.py", sdxlTrain], ["infer.py", sdxlInfe
 }
 const jobsApi = readFileSync(new URL("../api/jobs.js", import.meta.url), "utf8");
 const cloudApi = readFileSync(new URL("../api/cloud.js", import.meta.url), "utf8");
+const submitGpuJob = readFileSync(new URL("./Submit-GpuJob.ps1", import.meta.url), "utf8");
+assert.match(submitGpuJob, /Connect-CclSession/, "long-running GPU polling must be able to renew its login session");
+assert.match(submitGpuJob, /401,\s*403/, "GPU polling must retry authentication failures instead of abandoning a paid job");
 assert.match(cloudApi, /availability_zone:\s*selectedAvailabilityZone/, "Kakao GPU creation must pin the selected subnet availability zone");
 assert.match(cloudApi, /kakaoInstanceFailure\(candidate\)/, "Kakao GPU allocation failures must preserve the provider reason");
 assert.match(cloudApi, /카카오 GPU 준비 실패/, "Kakao setup errors must describe the failed stage accurately");
@@ -103,4 +106,9 @@ assert.throws(() => assertCreditCoversEstimate({ provider: "naver", estimate: 10
 assert.equal(assertCreditCoversEstimate({ provider: "naver", estimate: 100, remaining: 5000, expiresAt: "2026-07-31", now }).allowed, true);
 assert.throws(() => assertNoOtherActiveGpuJob([{ id: "existing", instance_id: "vm", status: "running" }], "new"), /another_gpu_job_active/);
 assert.equal(assertNoOtherActiveGpuJob([{ id: "old", instance_id: "vm", status: "completed" }], "new"), true);
+assert.equal(assertActiveGpuJobLimit([{ id: "one", instance_id: "vm-1", status: "running" }], "new", 2), true);
+assert.throws(() => assertActiveGpuJobLimit([
+  { id: "one", instance_id: "vm-1", status: "running" },
+  { id: "two", instance_id: "vm-2", status: "provisioning" },
+], "new", 2), /active_gpu_job_limit_reached/);
 console.log("GPU workbench contract tests OK");
